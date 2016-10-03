@@ -835,7 +835,7 @@ Interceptors provide a mechanism for implementing functionality across multiple 
 It is often used for non business features like logging or security.
 For instance, in Java EE 7 the JTA specification provides an interceptor to control transaction for the current invocation: `@Transactional`.
 
-== Interceptor Binding Type
+==== Interceptor Binding Type
 
 An interceptor binding is an annotation annotated with `@javax.interceptor.InterceptorBinding` meta-annotation.
 
@@ -942,7 +942,7 @@ public abstract class EventingDecorator implements MyBusiness //<3>
        evt.fire(message)
     }
 }
------
+----
 <1> the decorator is defined with the matching annotation
 <2> decorators are enabled and prioritized like interceptors
 <3> as all method don't have to be decorated (i.e implemented) the decorator is allowed to be an abstract class
@@ -952,7 +952,6 @@ A decorator must declare a single delegate injection point annotated `@javax.dec
 The delegate injection point is the bean to be decorated.
 Any calls to the delegate object that correspond to a decorated type will be called on the decorator, which may in turn invoke the method directly on the delegate object.
 The decorator bean does not need to implement all methods of the decorated types and may be abstract.
-
 
 ==== Activating and ordering decorators
 

@@ -1,3 +1,29 @@
 = CDI Refcardz
 
 This repository contains the CDI 1.2 refcardz in asciidoc.
+
+You should have Ruby and bundler installed to generate the docs.
+
+----
+$ bundle update
+----
+
+Will update the needed gems
+
+----
+$ asciidoctor -r asciidoctor-diagram refcardz_CDI_1_2.adoc
+----
+
+Will generate html version
+
+----
+$ asciidoctor-pdf -r asciidoctor-diagram refcardz_CDI_1_2.adoc
+----
+
+Will generate pdf version.
+
+Live reload version of the file can launched with
+
+----
+$ bundle exec guard
+----
