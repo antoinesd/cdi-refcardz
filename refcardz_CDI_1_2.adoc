@@ -10,6 +10,7 @@
 :toc: left
 :toclevels: 4
 :sectnumlevels: 4
+:data-uri:
 ifdef::backend-pdf[]
 :pagenums:
 endif::[]
