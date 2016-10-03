@@ -1,0 +1,972 @@
+= Contexts and Dependency Injection for the Java EE platform 1.2
+:author: Antoine Sabot-Durand
+:revnumber: 1.2
+:revdate: August 5, 2016
+:revremark: Early Draft
+:version-label!:
+:sectanchors:
+:doctype: article
+:icons: font
+:source-highlighter: coderay
+:source-language: java
+:toc: left
+:toclevels: 4
+:sectnumlevels: 4
+ifdef::backend-pdf[]
+:pagenums:
+endif::[]
+
+== About CDI
+
+Contexts and Dependency Injection for the Java EE Platform (CDI) introduces a standard set of component management services to the Java EE platform.
+CDI manages the lifecycle and interactions of stateful components bound to well-defined contexts.
+CDI provides typesafe dependency injection between components.
+CDI provides interceptors and decorators to extend the behavior of components, an event model for loosely coupled components, and an SPI allowing portable extensions to integrate cleanly with the Java EE environment.
+
+=== CDI and Java EE
+
+CDI is included in Java EE since Java EE 6 (CDI 1.0).
+The EE 6 platform was designed to make sure all EE components make use of CDI services, putting CDI directly at the heart of the platform, welding together the various EE technologies.
+
+In Java EE 7 (and CDI 1.2) this integration goes further with the automatic enablement of CDI in the platform and more integration with other spec.
+
+This document covers the main features of CDI 1.2 included in all Java EE 7 application server
+
+=== CDI implementations
+
+CDI 1.2 has 2 known implementation:
+
+* http://weld.cdi-spec.org/[JBoss Weld], the reference implementation, used by JBoss EAP, Wildlfy, Glassfish, Oracle WebLogic, IBM Websphere among others
+* http://openwebbeans.apache.org/[Apache OpenWebBeans], used by Apache TomEE server
+
+== Getting started with CDI
+
+The easiest way to start writing and running CDI code is to write a Java EE 7 application and deploy it on your favorite server (http://wildfly.org/[Wildlfly] is a good choice if you don't have any).
+
+The basic maven pom to start developing a Java EE 7 application is only 21 lines
+
+[source, xml]
+----
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.dzone</groupId>
+    <artifactId>javaee7-basic-pom</artifactId>
+    <version>7.0</version>
+    <packaging>war</packaging>
+    <dependencies>
+        <dependency>
+            <groupId>javax</groupId>
+            <artifactId>javaee-api</artifactId>
+            <version>7.0</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+    <properties>
+        <maven.compiler.source>1.7</maven.compiler.source>
+        <maven.compiler.target>1.7</maven.compiler.target>
+        <failOnMissingWebXml>false</failOnMissingWebXml>
+    </properties>
+</project>
+----
+
+== Activating and configuring CDI
+
+In Java EE 7, CDI is activated automatically: you don't need to add anything to your application to have CDI ready in it.
+
+When your app is launched CDI will scan your application to find its components (i.e. managed beans), this mechanism is called _bean discovery_.
+
+Types discovered by this mechanism will be analyzed by the container to check if they meet requirement to become beans as explain below.
+The bean discovery mode can be set by adding a `beans.xml` file in the module:
+
+* in META-INF folder for a jar,
+* in WEB-INF folder for a war.
+
+Bean discovery is defined for each module (i.e. jar) of the application also called _bean archive_ and can have 3 modes:
+
+* Annotated (default mode when no `beans.xml` file is present): only class having specific annotations called _Bean Defining Annotations_ will be discovered,
+* All: all the classes will be discovered
+* None: none of the classes will be discovered
+
+Keep in mind that there is no global configuration for the bean discovery, it is set only for the current bean archive.
+
+
+[source, xml]
+.Example of a `beans.xml` file setting bean discovery mode to `all`
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee
+                           http://xmlns.jcp.org/xml/ns/javaee/beans_1_1.xsd"
+       version="1.1" bean-discovery-mode="all">
+</beans>
+----
+
+=== Bean Defining annotations
+
+When a bean archive has its bean discovery mode set to Annotated (default mode when no `beans.xml` is present).
+Only the types having these annotation will be discovered:
+
+* `@ApplicationScoped`, `@SessionScoped`, `@ConversationScoped` and `@RequestScoped` annotations,
+* all other normal scope types,
+* `@Interceptor` and `@Decorator` annotations,
+* all stereotype annotations (i.e. annotations annotated with `@Stereotype`),
+* and the `@Dependent` scope annotation.
+
+Note that EJB session bean are not concerned by the bean discovery mechanism as they are always discovered as CDI bean unless explicitly excluded.
+
+=== Excluding types from discovery
+
+Managed beans and session beans can be excluded from the discovered beans by adding the `@Vetoed` annotation on their defining class or package.
+
+It can also be done in `beans.xml` file as explained in the http://docs.jboss.org/cdi/spec/1.2/cdi-spec.html#exclude_filters[spec].
+
+
+== The CDI container
+
+The container is the heart of CDI: You can see it as the invisible conductor of your application.
+
+It checks all possible CDI code at boot time, so exception at runtime are very rare in CDI, you know that something is wrong in your code at launch.
+
+The container manages your components lifecycle and services.
+It'll create class instances for you when needed and add CDI features on the provided object.
+This enriched object will be automatically destroyed when the scope they are bound to is destroyed.
+
+That's why you'll never use the `new` operator on a bean class unless you want to get rid of all CDI features on the resulting instance.
+
+
+== Beans and contextual instances
+
+CDI, at the most basic level, revolves around the notion of beans.
+The container discovers them at startup time by scanning classes in the deployment.
+A bean is defined by a set of attributes obtained by reading annotations and type on the bean definition.
+As we said above, the CDI container is in charge of creating and destroying beans instances according to their context, hence the term _contextual instance_.
+The table below introduces these attributes, they'll be detailed them later in this document.
+
+.Beans attributes
+|===
+
+| Types set |
+It is the set of Java types that the bean provides.
+This set is used when performing _typesafe resolution_ (find the candidate bean for an injection point).
+
+| Qualifiers |
+Qualifiers are developer-defined annotations and provide a typesafe way to distinguish between multiple beans sharing the same type.
+They are also used by the _typesafe resolution_ mechanism.
+
+| Scope |
+Scope (or context) determines the lifecycle and visibility of a bean.
+Container uses this attribute to know when to create and destroy a bean instance.
+
+| Alternative status |
+A bean can be defined as an alternative for an other bean.
+This feature can be used to ease tests creation for instance.
+
+| Name |
+This optional value, is the only way to resolve a bean in a non typesafe way (i.e. with a String identifier).
+It allows bean access from the UI layer (JSF or JSP) or when integrating a legacy framework with CDI.
+
+|===
+
+=== Bean vs Contextual instances
+
+In a lot of blog posts or documentation The term _Bean_ is often used instead of _contextual instance_. It's important to understand the difference.
+A bean is a collection of metadata associated to some code (usually a class) used by the container to provide _contextual instance_.
+A _contextual instance_ is the object that the container creates from the Bean attributes when an _injection point_ has to be satisfied.
+
+To make short, unless if you're developing an advanced CDI feature, your code will only deal with _contextual instances_ at runtime.
+
+
+== Defining an Injection Point
+
+As we just said _contextual instances_ are created and managed by the CDI container.
+When creating such an instance, the container may perform injection of other instances in it if it has one or more injection point.
+
+Keep in mind that injection occurs only when the instance is created by the container.
+
+Injection points are declared using the `@javax.inject.Inject` annotation.
+`@Inject` can be used in 3 places:
+
+=== Field injection
+
+When a field is annotated with `@Inject` the container will look for a bean having a matching type and will provide a _contextual instance_ of this bean to set the field value.
+
+.Example: Injecting in private a field
+[source]
+----
+public class MyBean {
+    
+    @Inject
+    private HelloService service;
+
+    public void displayHello() {
+        display(service.hello();
+    }
+}
+----
+
+
+=== Constructor injection
+
+Only one constructor in a bean class may be annotated with `@Inject`.
+All parameters of the constructor will be resolved by the container to invoke it.
+
+.Example: injecting in a constructor
+[source]
+----
+public class MyBean {
+
+    private HelloService service;
+
+    @Inject
+    private MyBean(HelloService service) {
+        this.service = service;
+    }
+}
+----
+
+=== Method injection
+
+A bean class can one or more methods annotated with `@Inject`.
+These methods are called _initializer methods_.
+
+.Example: injecting in a method
+[source]
+----
+public class MyBean {
+
+    private HelloService service;
+
+    @Inject
+    public void initService(HelloService service) {
+        this.service = service;
+    }
+}
+----
+
+=== Other injection points
+
+Two specific CDI elements always have injection point without the need of being annotated with `@Inject`:
+
+* Producer methods.
+* Observer methods.
+
+See below for their usage.
+
+
+== Different kind of CDI beans
+
+CDI provides different way to define Beans.
+The type set of the bean will vary with its kind.
+
+If needed using `@Typed` annotation on bean definition can restrict this type set.
+`Object` will always be part of bean type set.
+
+CDI is not affected by type erasure so for the container `List<String>` and `List<Number>` will be seen as two different types.
+
+All these bean kinds are detailed below:
+
+=== Managed beans
+
+Managed bean are the most obvious kind of bean available in CDI.
+They are defined by a class declaration in a bean archive.
+
+A class is eligible to become a managed bean if it follows the following conditions:
+
+* It is not a non-static inner class.
+* It is a concrete class, or is annotated `@Decorator`.
+* It has an appropriate constructor - either:
+** the class has a constructor with no parameters, or
+** the class declares a constructor annotated `@Inject`.
+
+That's for explicit bean archive (bean discovery set to _all_ in `beans.xml`).
+If the class is in an implicit bean archive (no beans.xml or bean discovery set to `annotated`) it should also have at least one of the following annotation to become a CDI managed bean:
+
+
+==== Bean types of a managed bean
+
+The set of bean types for a given managed bean contains:
+
+* the bean class,
+* every superclass (including `Object`),
+* all interface the class implements directly or indirectly.
+
+=== Session beans (EJB)
+
+Local stateless, singleton or stateful EJB are automatically treated as CDI session bean: they support injection, CDI scope, interception, decoration and all other CDI services.
+Remote EJB and MDB cannot be used as CDI beans.
+
+When using EJB in CDI you have the features of both specifications.
+You can for instance have asynchronous behavior and observer features in one bean.
+
+==== Bean types of a session bean
+
+The set of bean types for a given CDI session bean depend on its definition:
+
+If the session has local interfaces, it contains:
+
+* all local interfaces of the bean,
+* all super interfaces of these local interfaces, and
+* `Object` class.
+
+
+If the session bean has a no-interface view, it contains:
+
+* the bean class, and
+* every superclass (including `Object`).
+
+==== Examples
+
+[source]
+----
+@ConversationScoped
+@Stateful
+public class ShoppingCart { ... } //<1>
+
+@Stateless
+@Named("loginAction")
+public class LoginActionImpl implements LoginAction { ... } //<2>
+
+
+@ApplicationScoped
+@Singleton //<3>
+@Startup //<4>
+public class bootBean {
+ @Inject
+ MyBean bean;
+}
+
+----
+<1> A stateful bean (with no-interface view) defined in `@ConversationScoped` scope. It has `ShoppingCart` and `Object` in its bean types.
+<2> A stateless bean in `@Dependent` scope with a view. Usable in EL with name `loginAction`. It has `LoginAction` in its bean types.
+<3> It's `javax.ejb.Singleton` defining a singleton session bean.
+<4> The EJB will be instantiated at startup triggering instantiation of MyBean CDI bean.
+
+
+=== Producers
+
+Producers are the way to transform class you don't own into CDI bean.
+
+A producer can only be declared in an existing bean through field or method definition.
+
+By adding the `@Produces` annotation to a field or a non void method you declare a new producer and so a new Bean.
+
+Field or method defining a producer may have any modifier or even be static.
+
+Parameters in producer methods become injection point and are resolved by the container before the invocation.
+
+Producers are also used to defined Java EE resources (like Persistence Context or Resource) as a CDI bean.
+
+
+==== Bean types of a producer
+
+It depends of the type of the producer (field type or method returned type):
+
+* If it's an interface, the bean type set will contain the interface all interface it extends (directly or indirectly) and `Object`.
+* If it's a primitive or array type, the set will contain the type and `Object`.
+* If it's a class, the set will contains the class, every superclass and all interface it implements (directly or indirectly).
+
+==== Examples
+
+[source]
+----
+public class ProducerBean {
+
+  @Produces
+  @ApplicationScoped
+  private List<Integer> mapInt = new ArrayList<>(); //<1>
+
+  @Produces @RequestScoped @UserDatabase
+  public EntityManager create(EntityManagerFactory emf) { // <2>
+    return emf.createEntityManager();
+  }
+
+}
+----
+<1> This producer field defines a bean with Bean types `List<Integer>`, `Collection<Integer>`, `Iterable<Integer>` and `Object
+<2> This producer method defines a `EntityManager` with `@UserDatabase` qualifier in `@RequestScoped` from an `EntityManagerFactory` bean produced elsewhere.
+
+== Qualifiers
+
+Sometimes an injection point has more than bean candidate for injection.
+
+For instance, the following code will fail a startup with an "Ambiguous dependency" error:
+
+.An ambiguous injection point
+[source]
+----
+public class MyBean {
+    @Inject
+    HelloService service; //<1>
+}
+
+public interface HelloService {
+    public String hello();
+}
+
+public class FrenchHelloService implements HelloService {
+    public String hello() { 
+        return "Bonjour tout le monde!";
+    }
+}
+
+public class EnglishHelloService implements HelloService {
+    public String hello() {
+        return "Hello World!";
+    }
+}
+----
+<1> both implementation of `HelloService` are candidate here
+
+When bean type is not enough to resolve a bean, we can create a qualifier and it to a bean.
+
+.One qualifier by language
+[source]
+----
+@Qualifier
+@Retention(RUNTIME)
+@Target({FIELD, TYPE, METHOD, PARAMETER})
+public @interface French {
+}
+
+@Qualifier
+@Retention(RUNTIME)
+@Target({FIELD, TYPE, METHOD, PARAMETER})
+public @interface English {
+}
+----
+
+As qualifier is a type (an annotation) you keep the CDI strong typed approach.
+
+Qualifier are used on beans definition or injection points.
+
+[source]
+----
+@French
+public class FrenchHelloService implements HelloService {
+    public String hello() {
+        return "Bonjour tout le monde!";
+    }
+}
+
+@English
+public class EnglishHelloService implements HelloService {
+    public String hello() {
+        return "Hello World!";
+    }
+}
+
+public class MyBean {
+    @Inject
+    @French
+    HelloService serviceFr;
+
+    @Inject
+    @English
+    HelloService serviceEn;
+    
+}
+----
+
+To match a given bean, an injection point must have a non empty subset of the bean qualifiers (and of course a type present in its typeset.
+
+Qualifiers can also have members.
+We could have solve our language problem like this:
+
+.A qualifier to qualify the language of the bean
+[source]
+----
+@Qualifier
+@Retention(RUNTIME)
+@Target({FIELD, TYPE, METHOD, PARAMETER})
+public @interface Language {
+
+    LangChoice value();
+
+    public enum LangChoice {
+        FRENCH, ENGLISH
+    }
+}
+
+@Language(FRENCH)
+public class FrenchHelloService implements HelloService {
+    public String hello() { 
+        return "Bonjour tout le monde!";
+    }
+}
+
+@Language(ENGLISH)
+public class EnglishHelloService implements HelloService {
+    public String hello() {
+        return "Hello World!";
+    }
+}
+
+public class MyBean {
+    @Inject
+    @Language(value = FRENCH)
+    HelloService serviceFr;
+
+    @Inject
+    @Language(value = ENGLISH)
+    HelloService serviceEn;
+}
+----
+
+`@Nonbinding` annotation can applied to a qualifier member to exclude it from the qualifier resolution.
+
+.A qualifier with a non binding member
+[source]
+----
+@Qualifier
+@Retention(RUNTIME)
+@Target({FIELD, TYPE, METHOD, PARAMETER})
+public @interface MyQualifier {
+
+    @Nonbinding
+    String comment(); //<1>
+}
+----
+<1> Container will treat two instances of `MyQualifier` with different `comment()` values as the same qualifier.
+
+=== Built-in qualifiers
+
+CDI includes the following built-in qualifiers
+
+.Built-in qualifiers
+|===
+
+|`@Named` | set bean name for weak typed environment (EL, Javascript)
+
+|`@Default` | added to all beans without qualifier or having only `@Named`
+
+|`@Any` | added to all beans for programmatic lookup and decorators
+
+|`@Initialized` | to qualify events when a context is started
+
+|`@Destroyed` | to qualify events when a context is destroyed
+
+|===
+
+Remember:
+
+* a bean defined without qualifier has `@Any` and `@Default` qualifiers
+* a bean defined with `@Named` has `@Any`, `@Named` and `@Default` qualifiers
+* a bean defined with your `@MyQualifier` qualifier has `@Any` and `@MyQualifier` qualifiers
+
+
+== Contexts
+
+All _Beans_ have a _scope_ defined by an _annotation_.
+When there's no scope annotation on a bean its scope is `@Dependent`.
+
+A _scope_ should be seen as a label to design a _context_ object.
+Through its scope a _bean_ is bound to a _context_ which is in charge of creating, storing, and destroying _contextual instances_
+
+The _Container_ is in charge of _creating_ and _destroying_ _contexts_.
+
+A context may be inactive without being destroyed.
+
+To make short a _contextual instance_ for a given Bean is always a singleton in its context.
+Remember that _contextual instances_ are created by the container when they are requested not when their context is created.
+Scopes are not used to distinguish beans: if 2 beans with same type and qualifiers exist in 2 scopes, there will be ambiguity when injecting them.
+
+While it's possible to create new contexts and scopes with portable extensions.
+Out of the box, CDI provides the following built-in scopes and their matching contexts.
+
+
+.Built-in scopes
+|===
+
+| `@Dependent` | (default) bean has the same scope than the one in which it's injected
+
+| `@ApplicationScoped` | instance is linked to application lifecycle
+
+| `@SessionScoped` | instance is linked to http session lifecycle
+
+| `@RequestScoped` | instance is liked to http request lifecycle
+
+| `@ConversationScoped` | lifecycle manually controlled within session
+
+|===
+
+.scope examples
+[source]
+----
+public class BaseHelloService implements HelloService { ... } //<1>
+
+@RequestScoped //<2>
+public class RequestService {
+    @Inject HelloService service;
+}
+
+@ApplicationScoped  //<3>
+public class ApplicationService {
+    @Inject RequestService service; //<4>
+}
+----
+<1> Bean has default scope `@Dependent`, instances are created for each injection
+<2> Bean is `@RequestScoped`. Instance is created by request context and destroyed with request context
+<3> Bean is `@ApplicationScoped`. Instance is created by application context and will live during all application
+<4> No problem to inject bean from an other scope: CDI will provide the right bean
+
+
+== Typesafe resolution
+
+When resolving bean for a given injection point the container considers the set of types and qualifiers of all available beans to find the right candidate.
+
+.A simplified version of typesafe resolution process
+[plantuml, typesafe-resolution, svg]
+....
+@startuml
+start
+:container retrieve injection point type and qualifiers;
+:container browse all its beans and retains only those
+having the type of the injection point in their types set;
+if (eligible Beans set empty?) then (yes)
+  #Red:unsatisfied dependency;
+else (no)
+  :container only retains beans having all
+  the injection point qualifiers in their qualifiers set;
+  if (eligible Beans set empty?) then (yes)
+    #Red:unsatisfied dependency;
+  else (no)
+    if (there's only one eligible bean?) then (no)
+      #Red:ambiguous dependency;
+    else (yes)
+      #Green:injection point is resolved with the last Bean;
+    endif
+  endif
+endif
+stop
+@enduml
+....
+
+The actual process is a bit more complex with integration of Alternatives, but the general idea is here.
+
+If the container succeeds in resolving the injection point by finding one and only one eligible bean, the `create()` method of this bean will be used to provide an instance for it.
+
+== Programmatic lookup
+
+Sometimes it is useful to resolve a bean at runtime or find all beans that match a given type.
+Programmatic lookup brings this powerful feature thanks to the `Instance<T>` interface.
+
+.request an instance at runtime with `Instance<T>`
+[source]
+----
+public class MyBean {
+
+    @Inject
+    Instance<HelloService> services; //<1>
+
+    public void displayHello() {
+        if(!(services.isUnsatisfied() || services.isAmbiguous())) //<2>
+            display(services.get().hello()); //<3>
+    }
+}
+----
+<1> `Instance<T>` injection points are always satisfied and never fail at deployment time
+<2> Instance<T> provides test methods to know if requesting an instance is safe
+<3> with `Instance<T>` you control when bean a instance is requested with the `get()` method
+
+As instance extends the `Iterable` interface, you can use it to loop on instances of beans.
+
+[source]
+----
+public class MyBean {
+
+    @Inject
+    @Any //<1>
+    Instance<HelloService> services;
+
+    public void displayHello() {
+        for (HelloService service : services) {
+            display(service.hello());
+        }
+    }
+}
+----
+<1> All beans have `@Any` qualifier so this injection point gets `Instance` pointing to all bean having the type `HelloService`
+
+Finally programmatic lookup helps you to select a bean by its type and qualifier.
+
+[source]
+----
+public class MyBean {
+
+    @Inject
+    @Any
+    Instance<HelloService> services;
+
+    public void displayHello() {
+            display(
+                services.select(new AnnotationLiteral()<French> {}).get()); //<1>
+        }
+}
+----
+<1> `select()` also accepts a type.
+
+CDI spec provides `AnnotationLiteral` and `TypeLiteral` class to help you creating instance of an annotation or a parameterized type.
+
+== Accessing CDI from non CDI code
+
+When you need to retrieve a CDI bean from a non CDI code, the `CDI` class is the easiest way
+
+.Using `CDI.current()` to access bean graph
+[source]
+----
+public class NonManagedClass {
+
+    public HelloService getHelloService() {
+        Instance<HelloService> services = CDI.current().select(HelloService.class,new AnnotationLiteral()<French> {});
+        if (!(services.isUnsatisfied || services.isAmbiguous))
+            return services.get();
+        else
+            return null;
+    }
+}
+----
+
+The `CDI.current()` static method returns a `CDI` object which extends `Instance<Object>`.
+As all beans have `Object` in their type set, it allows you to perform a programmatic lookup on all your beans collection.
+
+CDI can also returns the `BeanManager` a class giving you access to advanced CDI features, include bean resolution.
+
+For Backward compatibility, the BeanManager is also accessible thru JNDI with the name `java:comp/BeanManager`.
+
+You can learn more on `BeanManager` in the http://docs.jboss.org/cdi/spec/1.2/cdi-spec.html#beanmanager[spec].
+
+== Events
+
+Events provide a mechanism for loosely coupled communication between components.
+An event consists of an event type, which may be any Java object, and optional event qualifiers.
+
+=== The event object
+
+Events are managed through instances of `javax.enterprise.event.Event`.
+Event objects are injected based on the event type.
+
+[source]
+----
+@Inject Event<LoggedInEvent>  normalEvent;
+@Inject @Admin Event<LoggedInEvent>  adminEvent;
+----
+
+Events are fired by calling `fire()` with an instance of the event type to be passed to the observer.
+
+[source]
+----
+event.fire(new LoggedInEvent(username));
+----
+
+=== Observers
+
+Observers listen for events with observer methods.
+An observer methods shoudl be defined in a bean and has one of its parameter annotated with `@javax.enterprise.event.Observes`.
+
+Additional parameters to an observer method are normal CDI injection points.
+
+[source]
+----
+public void afterLogin(@Observes LoggedInEvent event) {
+
+}
+
+public void afterAdminLogin(@Observes @Admin LoggedInEvent event) {
+
+}
+----
+
+
+
+=== Conditional observers
+
+If a _contextual instance_ of a bean with an observer method doesn’t exist when the corresponding event is fired, the container will create a new instance to handle the event.
+This behavior is controllable using the receive value of `@Observes`.
+
+.Values of `receive` member in `@Observes`
+|===
+
+| Reception value | Meaning
+
+| IF_EXISTS | The observer method is only called if an instance of the component already exists.
+
+| ALWAYS | The observer method is always called. If an instance doesn’t exist, one will be created. This is the default value.
+
+|===
+
+=== Transactional observer
+
+Event observers are normally processed when the event is fired.
+For transactional methods, it is often desirable for the event at a certain point in the transaction lifecycle, such as after the transaction completes.
+This is specified with the `during` value of `@Observes`.
+
+If a transaction phase is specified but no transaction is active, the event is fired immediately.
+
+
+
+.Values of `during` member in `@Observes`
+|===
+
+| TransactionPhase value | Meaning
+
+| IN_PROGRESS | The event is called when it is fired, without regard to the transaction phase. This is the default value.
+
+| BEFORE_COMPLETION | The event is called during the before completion phase of the transaction.
+
+| AFTER_COMPLETION | The event is called during the after completion phase of the transaction.
+
+| AFTER_FAILURE | The event is called during the after completion phase of the transaction, only when the transaction fails.
+
+| AFTER_SUCCESS | The event is called during the after completion phase of the transaction, only when the transaction completes successfully.
+
+|===
+
+
+
+== Interceptors and Decorators
+
+CDI supports two mechanisms for dynamically adding or modifying the behavior of beans: interceptors and decorators.
+
+
+=== Interceptors
+
+Interceptors provide a mechanism for implementing functionality across multiple beans and bean methods that is orthogonal to the core function of those beans.
+
+It is often used for non business features like logging or security.
+For instance, in Java EE 7 the JTA specification provides an interceptor to control transaction for the current invocation: `@Transactional`.
+
+== Interceptor Binding Type
+
+An interceptor binding is an annotation annotated with `@javax.interceptor.InterceptorBinding` meta-annotation.
+
+It's goal is to bind the interceptor code to the bean or method to intercept.
+
+.defining an interceptor binding
+[source]
+----
+@Inherited
+@Target({TYPE, METHOD})
+@Retention(RUNTIME)
+@InterceptorBinding
+public @interface Loggable {
+}
+----
+
+
+==== Interceptor definition
+
+An interceptor is a bean declared with the `@javax.interceptor.Interceptor` annotation.
+
+Its matching interceptor binding should also be added to its declaration.
+
+Since CDI 1.1 the interceptor can be enabled with `@javax.annotation.Priority` annotation giving also its resolution order.
+
+Method interceptor should have a method annotated `@javax.interceptor.AroundInvoke` that takes the `javax.interceptor.InvocationContext` as a parameter.
+
+.defining an interceptor
+[source]
+----
+@Interceptor
+@Loggable //<1>
+@Priority(Interceptor.Priority.APPLICATION) //<2>
+public class TransactionInterceptor {
+
+    @AroundInvoke //<3>
+    public Object logMethod(InvocationContext ctx) {
+        // …
+    }
+}
+----
+<1> the interceptor binding to bind this code to this annotation
+<2> the `@Priority` annotation enable and prioritize the interceptor.
+<3> `@AroundInvoke` indicates which method does the interception
+
+==== Using interceptor
+
+Thanks to interceptor binding it is very easy to apply the interceptor on bean or method.
+
+
+[source]
+----
+public class MyBean {
+    @Logabble
+    public void doSomething() {
+         ....
+    }
+}
+
+@Logabble
+public class MyOtherBean {
+
+    public void doSomething() {
+         ....
+    }
+}
+----
+
+When apply on a bean all its method will be intercepted.
+
+==== Activating and ordering interceptor
+
+In Java EE 7 the easiest way to activate an interceptor in to use the `@Priority` annotation.
+
+It is also possible to do it in `beans.xml` file as explained in the http://docs.jboss.org/cdi/spec/1.2/cdi-spec.html#enabled_interceptors[spec].
+
+=== Decorators
+
+Decorators also dynamically extend beans but with a slightly different mechanism than interceptors.
+Where interceptors deliver functionality orthogonal to potentially many beans, decorators extend the functionality of a single bean type with functionality that is specific to that type.
+
+Decorators are an easiest way to change the business operation of an existing bean.
+
+A decorator is bean annotated with `@javax.decorator.Decorator`.
+
+A decorator only decorates the interfaces that it implements (i.e to be decorated a bean must implement an interface).
+
+.Example: a decorator firing an event in addition of expected code execution
+[source]
+----
+@Decorator //<1>
+@Priority(Interceptor.Priority.APPLICATION) //<2>
+public abstract class EventingDecorator implements MyBusiness //<3>
+{
+    @Inject
+    @Delegate //<4>
+    MyBusiness business;
+
+    @Inject
+    Event<String> evt;
+
+    public void doSomething(String message) {
+       business.doSomething(message);
+       evt.fire(message)
+    }
+}
+-----
+<1> the decorator is defined with the matching annotation
+<2> decorators are enabled and prioritized like interceptors
+<3> as all method don't have to be decorated (i.e implemented) the decorator is allowed to be an abstract class
+<4> the decorated bean is injected with the specific `@Delegate` annotation.
+
+A decorator must declare a single delegate injection point annotated `@javax.decorator.Delegate`.
+The delegate injection point is the bean to be decorated.
+Any calls to the delegate object that correspond to a decorated type will be called on the decorator, which may in turn invoke the method directly on the delegate object.
+The decorator bean does not need to implement all methods of the decorated types and may be abstract.
+
+
+==== Activating and ordering decorators
+
+In Java EE 7 the easiest way to activate a decorator in to use the `@Priority` annotation.
+
+It is also possible to do it in `beans.xml` file as explained in the http://docs.jboss.org/cdi/spec/1.2/cdi-spec.html#enabled_decorators_priority[spec].
+
+Decorators are always called after interceptors.
+
+== Going further with CDI
+
+This document is only an introduction to CDI.
+A lot of topics are not covered here.
+
+To go further you can go to the http://www.cdi-spec.org/learn/[learn section] of the CDI specification website where a lot of resources are available to go deeper in CDI learning.

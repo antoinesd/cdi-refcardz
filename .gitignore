@@ -1,0 +1,17 @@
+## Ruby
+
+## Asciidoctor
+*.html
+*.pdf
+.asciidoctor/
+
+## Java
+.classpath
+.project
+.settings/
+target/
+logs/
+.idea/
+*.iml
+*.svg
+*.svg.cache

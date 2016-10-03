@@ -1,0 +1,3 @@
+= CDI Refcardz
+
+This repository contains the CDI 1.2 refcardz in asciidoc.
